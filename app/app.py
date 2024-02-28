@@ -1,10 +1,11 @@
 from typing import Annotated
+from time import sleep
 import secrets
 
 from pydantic import BaseModel
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, APIKeyQuery, APIKeyHeader
-
+from fastapi.responses import StreamingResponse
 app = FastAPI()
 security = HTTPBasic()
 
@@ -108,7 +109,7 @@ def add_admin_api_key(admin_name: Annotated[str, Depends(admin_auth)]):
 
 
 @app.get("/api/keys/show")
-def show_all_api_keys(
+async def show_all_api_keys(
     api_key: Annotated[ApiKey, Depends(get_api_key)]
 ):
     if not api_key.is_admin:
@@ -117,7 +118,7 @@ def show_all_api_keys(
             detail="this api key doesnt permit you to see the requested keys"
         )
     ud = {}
-    #TODO make faster! O(n) should be possible 
+    #TODO make faster! O(n) should be possible
     for key, user in user_api_keys.items():
         ud[user] = [key for key, _user in user_api_keys.items() if _user == user]
     return {
@@ -125,9 +126,19 @@ def show_all_api_keys(
         "user-keys": ud
     }
 
+queues = {}
+queue = ["1","2","3","4"]
+queues["m"] = queue
 
+def get_messages(user: str):
+    while True:
+        if len(queues[user]) >= 1:
+            yield queues[user].pop(0)
+        else:
+            break
+        sleep(1)
 @app.get("/api/keys/show/{user}")
-def show_user_api_key(
+async def show_user_api_key(
     user: str,
     api_key: Annotated[ApiKey, Depends(get_api_key)]
 ):
@@ -142,3 +153,14 @@ def show_user_api_key(
             [key for key, _user in user_api_keys.items() if _user == user]
         }
     }
+@app.get("/api/messages/{user}")
+async def get_messages_user(
+    user: str,
+    api_key: Annotated[ApiKey, Depends(get_api_key)]
+):
+    if not (api_key.is_admin or api_key.user == user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="this api key doesnt permit you to see the requested messages"
+        )
+    return StreamingResponse(get_messages(user))
