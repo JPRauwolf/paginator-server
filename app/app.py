@@ -116,16 +116,16 @@ def show_all_api_keys(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="this api key doesnt permit you to see the requested keys"
         )
-    users = set([u for u in user_api_keys.values()])
     ud = {}
-    for  in users:
-        if ud[user]:
-            ud[user].append(user_api_keys)
+    #TODO make faster! O(n) should be possible 
+    for key, user in user_api_keys.items():
+        ud[user] = [key for key, _user in user_api_keys.items() if _user == user]
     return {
         "admin-keys": admin_api_keys,
-        "user-keys":
+        "user-keys": ud
     }
-    
+
+
 @app.get("/api/keys/show/{user}")
 def show_user_api_key(
     user: str,
@@ -138,8 +138,7 @@ def show_user_api_key(
         )
     return {
         "user-keys": {
-            user :
-            [key for u, key in user_api_keys.items() if u == user]
+            user:
+            [key for key, _user in user_api_keys.items() if _user == user]
         }
     }
-
