@@ -21,18 +21,18 @@ query_key = APIKeyQuery(name="api-key", auto_error=False)
 
 def get_api_key(
     # cookie_key: str = Security(cookie_key),
-    header_key: str = Security(header_key),
-    query_key: str = Security(query_key)
+    _header_key: str = Security(header_key),
+    _query_key: str = Security(query_key)
 ) -> str:
 
     # if cookie_key in api_keys:
     #    return cookie_key
 
-    if header_key in api_keys:
-        return header_key
+    if _header_key in api_keys:
+        return _header_key
 
-    if query_key in api_keys:
-        return query_key
+    if _query_key in api_keys:
+        return _query_key
     
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
