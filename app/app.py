@@ -1,13 +1,26 @@
 from typing import Annotated
 from time import sleep
 import secrets
+from queue import SimpleQueue, Empty
 
 from pydantic import BaseModel
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, APIKeyQuery, APIKeyHeader
-from fastapi.responses import StreamingResponse
+
+class ApiKey(BaseModel):
+    api_key: str
+    user: str
+    is_admin: bool = False
+
+
+#TODO add other stuff
+class Message(BaseModel):
+    msg: str
+    from_user: str
+
 app = FastAPI()
 security = HTTPBasic()
+queues: dict[str, SimpleQueue[Message]] = {}
 
 # TODO keylists to file
 user_api_keys = {}
@@ -18,14 +31,20 @@ ADMIN_USER = b"jp"
 ADMIN_PASSWORD = b"password"
 
 header_key = APIKeyHeader(name="x-api-key", auto_error=False)
-query_key = APIKeyQuery(name="api-key", auto_error=False)
+query_key = APIKeyQuery(name="api-key", auto_error=False)    
 
+def queue_message( reciver: str, message: Message):
+    if not reciver in queues.keys():
+        queues[reciver] = SimpleQueue()
+    queues[reciver].put(message)
 
-class ApiKey(BaseModel):
-    api_key: str
-    user: str
-    is_admin: bool = False
-
+def unqueue_message(user:str) -> Message | None:
+    if not user in queues.keys():
+        return None
+    try:
+        return queues[user].get_nowait()
+    except Empty:
+        return None
 
 def get_api_key(
     _header_key: str = Depends(header_key),
@@ -126,17 +145,6 @@ async def show_all_api_keys(
         "user-keys": ud
     }
 
-queues = {}
-queue = ["1","2","3","4"]
-queues["m"] = queue
-
-def get_messages(user: str):
-    while True:
-        if len(queues[user]) >= 1:
-            yield queues[user].pop(0)
-        else:
-            break
-        sleep(1)
 @app.get("/api/keys/show/{user}")
 async def show_user_api_key(
     user: str,
@@ -153,14 +161,19 @@ async def show_user_api_key(
             [key for key, _user in user_api_keys.items() if _user == user]
         }
     }
-@app.get("/api/messages/{user}")
+    
+@app.get("/api/messages/{user}", status_code=status.HTTP_200_OK)
 async def get_messages_user(
     user: str,
-    api_key: Annotated[ApiKey, Depends(get_api_key)]
+    api_key: Annotated[ApiKey, Depends(get_api_key)],
+    response: Response
 ):
     if not (api_key.is_admin or api_key.user == user):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="this api key doesnt permit you to see the requested messages"
         )
-    return StreamingResponse(get_messages(user))
+    message = unqueue_message(user)
+    if message is None:
+        response.status_code = status.HTTP_204_NO_CONTENT
+    return {"message": message}
