@@ -11,16 +11,16 @@ security = HTTPBasic()
 api_keys = ["1337"]
 
 #todo read from env variable
-admin_user = b"jp"
-admin_password = b"password"
+ADMIN_USER = b"jp"
+ADMIN_PASSWORD = b"password"
 
-def authentificate_user(
+def passwd_auth(
     credentials: Annotated[HTTPBasicCredentials, Depends(security)]
 ):
-    user_name_bytes = credentials.username.encode("utf8")
-    user_name_right = secrets.compare_digest(user_name_bytes, b"jp")
-    password_bytes = credentials.password.encode("utf8")
-    password_right = secrets.compare_digest(password_bytes, b"password")
+    name = credentials.username.encode("utf8")
+    passwd = credentials.password.encode("utf8")
+    user_name_right = secrets.compare_digest(name, ADMIN_USER)
+    password_right = secrets.compare_digest(passwd, ADMIN_PASSWORD)
     if not (password_right and user_name_right):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -31,7 +31,7 @@ def authentificate_user(
     
 
 @app.get("/api/generatekey")
-def read_current_user(username: Annotated[HTTPBasicCredentials, Depends(authentificate_user)]):
+def read_current_user(username: Annotated[HTTPBasicCredentials, Depends(passwd_auth)]):
     return {"username": username}
 
 
