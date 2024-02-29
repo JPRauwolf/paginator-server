@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 import secrets
 from queue import SimpleQueue, Empty
 
@@ -18,10 +18,17 @@ class ApiKey(BaseModel):
 class MessageData(BaseModel):
     text: str
 
+
+class MessageBlob(BaseModel):
+    info: str
+    data: bytes
+
+
 class Message(BaseModel):
     sender: str
     receiver: str
-    data: MessageData
+    data: MessageData | None = None
+    data_blob: MessageBlob | None = None
 
 
 app = FastAPI()
@@ -190,7 +197,7 @@ async def get_messages_user(
     return {"message": message}
 
 
-@app.post("/api/messages/queue", status_code=status.HTTP_201_CREATED)
+@app.post("/api/messages/queue/plain", status_code=status.HTTP_201_CREATED)
 def create_message(
     data: MessageData,
     receiver: str,
@@ -200,6 +207,24 @@ def create_message(
         receiver=receiver,
         sender=api_key.user,
         data=data
+    )
+    queue_message(message.receiver, message)
+    return {
+        "status": "ok",
+        "message": message
+    }
+
+
+@app.post("/api/messages/queue/blob", status_code=status.HTTP_201_CREATED)
+def create_message(
+    data: MessageBlob,
+    receiver: str,
+    api_key: Annotated[ApiKey, Depends(get_api_key)]
+):
+    message = Message(
+        receiver=receiver,
+        sender=api_key.user,
+        data_blob=data
     )
     queue_message(message.receiver, message)
     return {
