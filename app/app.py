@@ -1,5 +1,4 @@
 from typing import Annotated
-from time import sleep
 import secrets
 from queue import SimpleQueue, Empty
 
@@ -7,16 +6,23 @@ from pydantic import BaseModel
 from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, APIKeyQuery, APIKeyHeader
 
+
 class ApiKey(BaseModel):
     api_key: str
     user: str
     is_admin: bool = False
 
 
-#TODO add other stuff
+# TODO add other stuff
+
+class MessageData(BaseModel):
+    text: str
+
 class Message(BaseModel):
-    msg: str
-    from_user: str
+    sender: str
+    receiver: str
+    data: MessageData
+
 
 app = FastAPI()
 security = HTTPBasic()
@@ -31,20 +37,23 @@ ADMIN_USER = b"jp"
 ADMIN_PASSWORD = b"password"
 
 header_key = APIKeyHeader(name="x-api-key", auto_error=False)
-query_key = APIKeyQuery(name="api-key", auto_error=False)    
+query_key = APIKeyQuery(name="api-key", auto_error=False)
 
-def queue_message( reciver: str, message: Message):
+
+def queue_message(reciver: str, message: Message):
     if not reciver in queues.keys():
         queues[reciver] = SimpleQueue()
     queues[reciver].put(message)
 
-def unqueue_message(user:str) -> Message | None:
+
+def unqueue_message(user: str) -> Message | None:
     if not user in queues.keys():
         return None
     try:
         return queues[user].get_nowait()
     except Empty:
         return None
+
 
 def get_api_key(
     _header_key: str = Depends(header_key),
@@ -137,13 +146,14 @@ async def show_all_api_keys(
             detail="this api key doesnt permit you to see the requested keys"
         )
     ud = {}
-    #TODO make faster! O(n) should be possible
+    # TODO make faster! O(n) should be possible
     for key, user in user_api_keys.items():
         ud[user] = [key for key, _user in user_api_keys.items() if _user == user]
     return {
         "admin-keys": admin_api_keys,
         "user-keys": ud
     }
+
 
 @app.get("/api/keys/show/{user}")
 async def show_user_api_key(
@@ -161,8 +171,9 @@ async def show_user_api_key(
             [key for key, _user in user_api_keys.items() if _user == user]
         }
     }
-    
-@app.get("/api/messages/{user}", status_code=status.HTTP_200_OK)
+
+
+@app.get("/api/messages/next/{user}", status_code=status.HTTP_200_OK)
 async def get_messages_user(
     user: str,
     api_key: Annotated[ApiKey, Depends(get_api_key)],
@@ -177,3 +188,21 @@ async def get_messages_user(
     if message is None:
         response.status_code = status.HTTP_204_NO_CONTENT
     return {"message": message}
+
+
+@app.post("/api/messages/queue", status_code=status.HTTP_201_CREATED)
+def create_message(
+    data: MessageData,
+    receiver: str,
+    api_key: Annotated[ApiKey, Depends(get_api_key)]
+):
+    message = Message(
+        receiver=receiver,
+        sender=api_key.user,
+        data=data
+    )
+    queue_message(message.receiver, message)
+    return {
+        "status": "ok",
+        "message": message
+    }
