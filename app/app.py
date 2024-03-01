@@ -1,35 +1,11 @@
-from typing import Annotated, Optional
+from typing import Annotated
 import secrets
 from queue import SimpleQueue, Empty
 
-from pydantic import BaseModel
 from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, APIKeyQuery, APIKeyHeader
 
-
-class ApiKey(BaseModel):
-    api_key: str
-    user: str
-    is_admin: bool = False
-
-
-# TODO add other stuff
-
-class MessageData(BaseModel):
-    text: str
-
-
-class MessageBlob(BaseModel):
-    info: str
-    data: bytes
-
-
-class Message(BaseModel):
-    sender: str
-    receiver: str
-    data: MessageData | None = None
-    data_blob: MessageBlob | None = None
-
+from models import Message, MessageBlob, MessageData, ApiKey
 
 app = FastAPI()
 security = HTTPBasic()
@@ -198,7 +174,7 @@ async def get_messages_user(
 
 
 @app.post("/api/messages/queue/plain", status_code=status.HTTP_201_CREATED)
-def create_message(
+def create_message_plain(
     data: MessageData,
     receiver: str,
     api_key: Annotated[ApiKey, Depends(get_api_key)]
@@ -216,7 +192,7 @@ def create_message(
 
 
 @app.post("/api/messages/queue/blob", status_code=status.HTTP_201_CREATED)
-def create_message(
+def create_message_blob(
     data: MessageBlob,
     receiver: str,
     api_key: Annotated[ApiKey, Depends(get_api_key)]
