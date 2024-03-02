@@ -1,74 +1,38 @@
 from typing import Annotated
 import secrets
-from queue import SimpleQueue, Empty
 
 from fastapi import FastAPI, Depends, HTTPException, status, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, APIKeyQuery, APIKeyHeader
+from fastapi.security import APIKeyHeader
 
-from models import Message, MessageBlob, MessageData, ApiKey
+from models import Message, MessageBlob, MessageData, User, QueueUser, CreateUser
+
+# TODO read from env variable
+ADMIN_USER = b"admin"
+ADMIN_TOKEN = b"1337"
+
+admin_user = QueueUser(
+    User(
+        name=ADMIN_USER,
+        hidden=True,
+        key=ADMIN_TOKEN,
+        is_admin=True
+    )
+)
+
 
 app = FastAPI()
-security = HTTPBasic()
-queues: dict[str, SimpleQueue[Message]] = {}
-
-# TODO keylists to file
-user_api_keys = {}
-admin_api_keys = ["1337"]
-
-# todo read from env variable
-ADMIN_USER = b"jp"
-ADMIN_PASSWORD = b"password"
+qusers: dict[str, QueueUser] = {admin_user.user.name: admin_user}
 
 header_key = APIKeyHeader(name="x-api-key", auto_error=False)
-query_key = APIKeyQuery(name="api-key", auto_error=False)
 
 
-def queue_message(reciver: str, message: Message):
-    if not reciver in queues.keys():
-        queues[reciver] = SimpleQueue()
-    queues[reciver].put(message)
-
-
-def unqueue_message(user: str) -> Message | None:
-    if not user in queues.keys():
-        return None
-    try:
-        return queues[user].get_nowait()
-    except Empty:
-        return None
-
-
-def get_api_key(
-    _header_key: str = Depends(header_key),
-    _query_key: str = Depends(query_key)
-) -> ApiKey:
+def user_auth(
+    _header_key: str = Depends(header_key)
+) -> QueueUser:
     if _header_key:
-        if _header_key in admin_api_keys:
-            return ApiKey(
-                api_key=_header_key,
-                user="admin",
-                is_admin=True
-            )
-        if _header_key in user_api_keys.keys():
-            return ApiKey(
-                api_key=_header_key,
-                user=user_api_keys[_header_key]
-            )
-
-    if _query_key:
-        if _query_key in admin_api_keys:
-            return ApiKey(
-                api_key=_query_key,
-                user="admin",
-                is_admin=True
-            )
-
-        if _query_key in user_api_keys.keys():
-            return ApiKey(
-                api_key=_query_key,
-                user=user_api_keys[_query_key]
-            )
-
+        for _, user in qusers.items():
+            if secrets.compare_digest(user.user.key.encode("utf8"), _header_key.encode("utf8")):
+                return user
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="api key missing or incorrect"
@@ -76,117 +40,130 @@ def get_api_key(
 
 
 def admin_auth(
-    credentials: Annotated[HTTPBasicCredentials, Depends(security)]
+    quser: QueueUser = Depends(user_auth)
+) -> QueueUser:
+    if quser.user.is_admin:
+        return quser
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="you are not permitted to do this operation"
+    )
+
+
+def generate_key() -> str:
+    return "PN-" + secrets.token_urlsafe(16)
+
+
+@app.post("/api/add/user", status_code=status.HTTP_201_CREATED)
+def add_user_key(
+    cuser: CreateUser,
+    admin_quser: Annotated[QueueUser, Depends(admin_auth)]
 ):
-    name = credentials.username.encode("utf8")
-    passwd = credentials.password.encode("utf8")
-    user_name_right = secrets.compare_digest(name, ADMIN_USER)
-    password_right = secrets.compare_digest(passwd, ADMIN_PASSWORD)
-    if not (password_right and user_name_right):
+    if cuser.name in qusers:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="wrong username or password",
-            headers={"WWW-Authenticate": "Basic"}
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User already exists"
         )
-    return name
-
-
-@app.get("/api/keys/add/user")
-def add_user_api_key(user_name: str, admin_name: Annotated[str, Depends(admin_auth)]):
-    new_key = "PN-" + secrets.token_urlsafe(16)
-    user_api_keys[new_key] = user_name
+    quser = QueueUser(
+        cuser.to_user(generate_key())
+    )
+    qusers[quser.user] = quser
     return {
         "status": "success",
-        "details": "created new user api key",
-        "api-key": {
-            "user": user_name,
-            "key": new_key
-        }
+        "detail": quser
     }
 
 
-@app.get("/api/keys/add/admin")
-def add_admin_api_key(admin_name: Annotated[str, Depends(admin_auth)]):
-    new_key = "PN-" + secrets.token_urlsafe(16)
-    admin_api_keys.append(new_key)
+@app.get("/api/users/refreshkey")
+def refresh_api_key(
+    quser: Annotated[QueueUser, Depends(user_auth)]
+):
+    qusers[quser.user.name].user.key = generate_key()
     return {
         "status": "success",
-        "details": "created new admin api key",
-        "api-key": {
-            "user": "admin",
-            "key": new_key
-        }
+        "detail": qusers[quser.user.name]
     }
 
 
-@app.get("/api/keys/show")
-async def show_all_api_keys(
-    api_key: Annotated[ApiKey, Depends(get_api_key)]
-):
-    if not api_key.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="this api key doesnt permit you to see the requested keys"
-        )
-    ud = {}
-    # TODO make faster! O(n) should be possible
-    for key, user in user_api_keys.items():
-        ud[user] = [key for key, _user in user_api_keys.items() if _user == user]
-    return {
-        "admin-keys": admin_api_keys,
-        "user-keys": ud
-    }
-
-
-@app.get("/api/keys/show/{user}")
-async def show_user_api_key(
+@app.get("/api/users/refreshkey/{user}")
+def refresh_other_api_key(
     user: str,
-    api_key: Annotated[ApiKey, Depends(get_api_key)]
+    admin_quser: Annotated[QueueUser, Depends(admin_auth)]
 ):
-    if not (api_key.is_admin or api_key.user == user):
+    if user not in qusers:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="this api key doesnt permit you to see the requested keys"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="the requested user does not exist"
         )
+    qusers[user].user.key = generate_key()
     return {
-        "user-keys": {
-            user:
-            [key for key, _user in user_api_keys.items() if _user == user]
-        }
+        "status": "success",
+        "detail": qusers[user]
     }
 
 
-@app.get("/api/messages/next/{user}", status_code=status.HTTP_200_OK)
-async def get_messages_user(
+@app.get("/api/users/show")
+async def show_users(
+    quser: Annotated[QueueUser, Depends(user_auth)]
+):
+    if quser.user.is_admin:
+        u_list = list(qusers.keys())
+    else:
+        u_list = [u.name for u in qusers.values() if not u.hidden]
+    return {
+        "users": u_list
+    }
+
+
+@app.get("/api/users/detail/{user}")
+async def show_user_detail(
     user: str,
-    api_key: Annotated[ApiKey, Depends(get_api_key)],
+    asking_quser: Annotated[QueueUser, Depends(user_auth)]
+):
+    if not (asking_quser.user.is_admin or asking_quser.user.name == user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="you are not permitted to do this operation"
+        )
+    if user not in qusers:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="user does not exist"
+        )
+    return qusers[user]
+
+
+@app.get("/api/messages/get/", status_code=status.HTTP_200_OK)
+def get_messages_user(
+    user: Annotated[QueueUser, Depends(user_auth)],
     response: Response
 ):
-    if not (api_key.is_admin or api_key.user == user):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="this api key doesnt permit you to see the requested messages"
-        )
-    message = unqueue_message(user)
+    message = user.unqueue_message()
     if message is None:
         response.status_code = status.HTTP_204_NO_CONTENT
-    return {"message": message}
+    return {
+        "message": message
+    }
 
 
 @app.post("/api/messages/queue/plain", status_code=status.HTTP_201_CREATED)
 def create_message_plain(
     data: MessageData,
     receiver: str,
-    api_key: Annotated[ApiKey, Depends(get_api_key)]
+    quser: Annotated[QueueUser, Depends(user_auth)]
 ):
+    if receiver not in qusers:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no user with the name {receiver} exists"
+        )
     message = Message(
-        receiver=receiver,
-        sender=api_key.user,
+        sender=quser.user.name,
         data=data
     )
-    queue_message(message.receiver, message)
+    qusers[receiver].queue_message(message)
     return {
-        "status": "ok",
         "message": message
     }
 
@@ -195,15 +172,18 @@ def create_message_plain(
 def create_message_blob(
     data: MessageBlob,
     receiver: str,
-    api_key: Annotated[ApiKey, Depends(get_api_key)]
+    quser: Annotated[QueueUser, Depends(user_auth)]
 ):
+    if receiver not in qusers:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"no user with the name {receiver} exists"
+        )
     message = Message(
-        receiver=receiver,
-        sender=api_key.user,
+        sender=quser.user.name,
         data_blob=data
     )
-    queue_message(message.receiver, message)
+    qusers[receiver].queue_message(message)
     return {
-        "status": "ok",
         "message": message
     }
