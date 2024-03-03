@@ -55,7 +55,7 @@ def generate_key() -> str:
     return "PN-" + secrets.token_urlsafe(16)
 
 
-@app.post("/api/add/user", status_code=status.HTTP_201_CREATED)
+@app.post("/api/users/add", status_code=status.HTTP_201_CREATED)
 def add_user_key(
     cuser: CreateUser,
     admin_quser: Annotated[QueueUser, Depends(admin_auth)]
