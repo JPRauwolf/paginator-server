@@ -4,7 +4,7 @@ import secrets
 from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.security import APIKeyHeader
 
-from models import Message, MessageBlob, MessageData, User, QueueUser, CreateUser
+from .models import Message, MessageBlob, MessageData, User, QueueUser, CreateUser
 
 # TODO read from env variable
 ADMIN_USER = b"admin"
