@@ -25,8 +25,11 @@ class User(BaseModel):
     is_admin: bool = False
     is_hidden: bool = False
 
+    def __hash__(self):
+        return hash(self.name)
+
     def __eq__(self, other):
-        return self.name == other.name
+        return isinstance(other, User) and self.name == other.name
 
 
 class CreateUser(BaseModel):
