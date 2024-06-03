@@ -8,24 +8,8 @@ from fastapi.security import APIKeyHeader
 
 from models import Message, MessageBlob, MessageData, User, QueueUser, CreateUser
 
-# TODO read from env variable
-
-'''
-ADMIN_USER = b"admin"
-ADMIN_TOKEN = b"1337"
-
-admin_user = QueueUser(
-    User(
-        name=ADMIN_USER,
-        hidden=True,
-        key=ADMIN_TOKEN,
-        is_admin=True
-    )
-)
-'''
-
 app = FastAPI()
-qusers: dict[str, QueueUser] = {}#= {admin_user.user.name: admin_user}
+qusers: dict[str, QueueUser] = {}
 
 header_key = APIKeyHeader(name="x-api-key", auto_error=False)
 
