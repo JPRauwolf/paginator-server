@@ -1,0 +1,5 @@
+- user:
+    name: "admin"
+    key: "abc123"
+    is_hidden: true
+    is_admin: true
