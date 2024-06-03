@@ -1,0 +1,10 @@
+- user:
+    name: "admin"
+    key: "1337"
+    is_hidden: true
+    is_admin: true
+- user:
+    name: "test"
+    key: "secret"
+    is_hidden: false
+    is_admin: false

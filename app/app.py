@@ -1,12 +1,16 @@
 from typing import Annotated
 import secrets
 
+import yaml
+
 from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.security import APIKeyHeader
 
-from .models import Message, MessageBlob, MessageData, User, QueueUser, CreateUser
+from models import Message, MessageBlob, MessageData, User, QueueUser, CreateUser
 
 # TODO read from env variable
+
+'''
 ADMIN_USER = b"admin"
 ADMIN_TOKEN = b"1337"
 
@@ -18,13 +22,28 @@ admin_user = QueueUser(
         is_admin=True
     )
 )
-
+'''
 
 app = FastAPI()
-qusers: dict[str, QueueUser] = {admin_user.user.name: admin_user}
+qusers: dict[str, QueueUser] = {}#= {admin_user.user.name: admin_user}
 
 header_key = APIKeyHeader(name="x-api-key", auto_error=False)
 
+def add_user_from_file():
+    with open('/etc/paginator/config/users.yaml', 'r') as f:
+        y = yaml.safe_load(f)
+        for user in y:
+            if (user['user']):
+                u = user['user']
+                q = QueueUser(User(
+                    name=u['name'],
+                    key=u['key'],
+                    is_hidden=u['is_hidden'],
+                    is_admin=u['is_admin']
+                ))
+                qusers[u['name']] = q
+
+add_user_from_file()
 
 def user_auth(
     _header_key: str = Depends(header_key)
@@ -110,7 +129,7 @@ async def show_users(
     if quser.user.is_admin:
         u_list = list(qusers.keys())
     else:
-        u_list = [u.name for u in qusers.values() if not u.hidden]
+        u_list = [u.user.name for u in qusers.values() if not u.user.is_hidden]
     return {
         "users": u_list
     }
